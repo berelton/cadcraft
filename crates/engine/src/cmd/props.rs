@@ -42,7 +42,7 @@ pub fn specs() -> Vec<CommandSpec> {
         CommandSpec::new("style", "Text Style...", run_style)
             .menu(&["Format", "Text Style..."])
             .alias(&["st"])
-            .params("{name, font?, bigFont?, height?, widthFactor?, oblique? (degrees), backwards?, upsideDown?, vertical?, annotative?, current?} → styles"),
+            .params("{name, preset?: \"gost\" (GOST 2.304 type B: stroke font, 15° oblique, width 0.9; name defaults to \"GOST 2.304 B\"), font?, bigFont?, height?, widthFactor?, oblique? (degrees), backwards?, upsideDown?, vertical?, annotative?, current?} → styles"),
         CommandSpec::new("style.list", "List Text Styles", run_style_list).params("{} → text styles").noundo(),
         CommandSpec::new("style.rename", "Rename Text Style", run_style_rename).params("{from, to}"),
         CommandSpec::new("style.delete", "Delete Text Style", run_style_delete).params("{name} (not Standard, the current style or one in use)"),
@@ -653,7 +653,16 @@ fn styles_json(d: &cadcraft_doc::Drawing) -> Value {
 }
 
 fn run_style(s: &mut Session, p: &Value) -> Result<Value> {
-    let name = str_param(p, "name").ok_or_else(|| bad("style", "`name` is required"))?.trim().to_string();
+    let gost = match str_param(p, "preset").map(str::trim) {
+        None => false,
+        Some(t) if ["gost", "gost-b", "gost-2.304-b", "gost 2.304 b"].iter().any(|g| t.eq_ignore_ascii_case(g)) => true,
+        Some(t) => return Err(bad("style", format!("unknown preset `{t}` (gost)"))),
+    };
+    let name = match str_param(p, "name") {
+        Some(n) => n.trim().to_string(),
+        None if gost => cadcraft_doc::TextStyle::GOST_TYPE_B.to_string(),
+        None => return Err(bad("style", "`name` is required")),
+    };
     if name.is_empty() || name.len() > 255 {
         return Err(bad("style", "bad style name"));
     }
@@ -665,6 +674,10 @@ fn run_style(s: &mut Session, p: &Value) -> Result<Value> {
             d.text_styles.len() - 1
         }
     };
+    // A preset resets the style to its values; the parameters below then adjust it.
+    if gost && let Some(st) = d.text_styles.get_mut(idx) {
+        *st = cadcraft_doc::TextStyle::gost_type_b(&st.name);
+    }
     let num = |k: &str| p.get(k).and_then(Value::as_f64).filter(|v| v.is_finite());
     if let Some(st) = d.text_styles.get_mut(idx) {
         if let Some(f) = str_param(p, "font").map(str::trim).filter(|f| !f.is_empty()) {
