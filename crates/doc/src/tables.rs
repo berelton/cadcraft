@@ -141,6 +141,19 @@ impl Default for TextStyle {
     }
 }
 
+impl TextStyle {
+    /// The name [`TextStyle::gost_type_b`] gives its style.
+    pub const GOST_TYPE_B: &'static str = "GOST 2.304 B";
+
+    /// A GOST 2.304 type B drafting style in the stroke font: letters slanted 75° to the
+    /// baseline (15° oblique) and a width factor of 0.9, which brings the stroke font's capitals
+    /// (4/6 of the height wide) to the standard's 6/10 h and its spacing near 2/10 h. The height
+    /// is not fixed, so one style serves the standard sizes (2.5, 3.5, 5, 7, 10, 14 mm).
+    pub fn gost_type_b(name: &str) -> TextStyle {
+        TextStyle { name: name.into(), width_factor: 0.9, oblique: 15f64.to_radians(), ..TextStyle::default() }
+    }
+}
+
 /// Dimension style variables (the subset that affects geometry and text).
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]

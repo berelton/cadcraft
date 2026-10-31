@@ -631,6 +631,38 @@ mod tests {
         }
     }
 
+    /// The Russian alphabet (GOST 2.304) and `№` are drawn by the stroke font itself, so
+    /// Cyrillic text never falls back to an installed font (or to boxes without one).
+    #[test]
+    fn cyrillic_has_stroke_glyphs_in_grid() {
+        let letters = ('А'..='я').chain(['Ё', 'ё', '№']);
+        for c in letters {
+            let (w, spec) = stroke::glyph(c).unwrap_or_else(|| panic!("missing glyph {c:?}"));
+            assert!(!draws_fallback(c), "{c:?} falls back");
+            let strokes = stroke::strokes(spec);
+            assert!(!strokes.is_empty(), "{c:?} draws nothing");
+            for st in strokes {
+                assert!(st.len() >= 2, "{c:?} has a one-point stroke");
+                for (x, y) in st {
+                    assert!(x >= 0.0 && x <= w, "{c:?} x={x} w={w}");
+                    assert!((-2.0..=8.0).contains(&y), "{c:?} y={y}");
+                }
+            }
+        }
+        // Letters with no Latin look-alike each have an outline of their own.
+        let own = "БГДЁЖИЙЛПУФЦЧШЩЪЫЬЭЮЯбвгдёжзийклмнптфцчшщъыьэюя";
+        let mut seen = std::collections::BTreeMap::new();
+        for c in own.chars() {
+            let spec = stroke::glyph(c).map(|g| g.1).unwrap_or_default();
+            if let Some(other) = seen.insert(spec, c) {
+                panic!("{c:?} draws the same as {other:?}");
+            }
+        }
+        let sh = shape_stroke("Чертёж №1 Щит", 5.0, 1.0, 0.0);
+        assert!(!sh.strokes.is_empty());
+        assert!(sh.glyphs.is_empty(), "no fallback outlines");
+    }
+
     #[test]
     fn control_codes() {
         let d: String = decode_controls("45%%d %%p0.1 %%c10 100%%%").iter().map(|x| x.0).collect();
