@@ -221,6 +221,13 @@ fn insert_entity(blk: &Block, at: Vec2, scale: Vec2, rotation: f64, base: Option
     ins
 }
 
+/// The factor a reference of `blk` is scaled by on insertion, on top of the scale asked for: from
+/// the block's units (a drawing file's `$INSUNITS` when it was inserted or attached from one) to
+/// this drawing's `$INSUNITS`, as AutoCAD does. 1 when either is unitless.
+pub(crate) fn block_units_factor(d: &cadcraft_doc::Drawing, blk: &Block) -> f64 {
+    cadcraft_doc::insunits_factor(i64::from(blk.units), d.header.i64("INSUNITS", 0))
+}
+
 /// [`insert`] with separate X/Y scale factors and an optional base point (see [`insert_entity`]).
 pub(crate) fn insert_with(
     s: &mut Session,
@@ -232,7 +239,7 @@ pub(crate) fn insert_with(
     values: &serde_json::Map<String, Value>,
 ) -> Result<Handle> {
     let blk = s.doc()?.block(name).cloned().ok_or_else(|| EngineError::Other(format!("Block \"{name}\" not found.")))?;
-    let mut ins = insert_entity(&blk, at, scale, rotation, base);
+    let mut ins = insert_entity(&blk, at, scale * block_units_factor(s.doc()?, &blk), rotation, base);
     let m = ins.transform(blk.base.xy());
     for e in blk.entities.iter() {
         if let EntityKind::AttDef(ad) = &e.kind {
@@ -343,10 +350,43 @@ fn run_attdef(s: &mut Session, p: &Value) -> Result<Value> {
     Ok(json!({ "handle": s.add_entity(k)?.hex() }))
 }
 
+/// Header variables WBLOCK carries from the source drawing to the one it writes: its units,
+/// how they are shown, and the current styles and sizes.
+const WBLOCK_HEADER: &[&str] = &[
+    "MEASUREMENT",
+    "INSUNITS",
+    "LUNITS",
+    "LUPREC",
+    "AUNITS",
+    "AUPREC",
+    "ANGBASE",
+    "ANGDIR",
+    "DIMSTYLE",
+    "TEXTSTYLE",
+    "TEXTSIZE",
+    "DIMSCALE",
+    "LTSCALE",
+    "PSLTSCALE",
+    "CELTSCALE",
+];
+
+/// The empty drawing WBLOCK fills: the template of the source's measurement system (metric or
+/// imperial) with the source's unit and style variables.
+fn wblock_drawing(src: &cadcraft_doc::Drawing) -> cadcraft_doc::Drawing {
+    let mut d = if src.header.i64("MEASUREMENT", 0) == 1 { cadcraft_doc::Drawing::new_metric() } else { cadcraft_doc::Drawing::new_imperial() };
+    for name in WBLOCK_HEADER {
+        if let Some(v) = src.header.get(name) {
+            d.header.set(name, v.clone());
+        }
+    }
+    d.scales = src.scales.clone();
+    d
+}
+
 fn run_wblock(s: &mut Session, p: &Value) -> Result<Value> {
     let path = str_param(p, "path").ok_or_else(|| bad("wblock", "`path` is required"))?.to_string();
     let src = s.doc()?;
-    let mut d = cadcraft_doc::Drawing::new_imperial();
+    let mut d = wblock_drawing(src);
     d.layers = src.layers.clone();
     d.linetypes = src.linetypes.clone();
     d.text_styles = src.text_styles.clone();
@@ -359,6 +399,10 @@ fn run_wblock(s: &mut Session, p: &Value) -> Result<Value> {
     let m = Mat3::translate(-base.unwrap_or(Vec2::ZERO));
     let ents: Vec<Entity> = if let Some(name) = str_param(p, "name") {
         let b = src.block(name).ok_or_else(|| bad("wblock", format!("no block `{name}`")))?;
+        // A block with units of its own is written in them.
+        if b.units != 0 {
+            d.header.set_i64("INSUNITS", i64::from(b.units));
+        }
         let m = Mat3::translate(-base.unwrap_or(b.base.xy()));
         b.entities
             .iter()
@@ -837,7 +881,7 @@ impl Interactive for InsertM {
             _ => Vec2::new(1.0, 1.0),
         });
         let rot = self.rotation.unwrap_or(if self.stage == InsStage::Rotation { at.angle_to(c) } else { 0.0 });
-        vec![EntityKind::Insert(insert_entity(b, at, scale, rot, self.base))]
+        vec![EntityKind::Insert(insert_entity(b, at, scale * block_units_factor(d, b), rot, self.base))]
     }
 }
 

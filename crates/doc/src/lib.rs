@@ -28,7 +28,7 @@ pub use constraint::*;
 pub use entity::*;
 pub use extents::{MAX_BLOCK_DEPTH, entity_bounds};
 pub use gdt::*;
-pub use header::{HVal, Header};
+pub use header::{HVal, Header, insunits_factor, insunits_metres};
 pub use plotstyle::*;
 pub use plotter::*;
 pub use refedit::{RefEdit, WorkItem};
