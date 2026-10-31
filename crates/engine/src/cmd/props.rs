@@ -50,7 +50,7 @@ pub fn specs() -> Vec<CommandSpec> {
         CommandSpec::new("dimstyle", "Dimension Style...", run_dimstyle)
             .menu(&["Format", "Dimension Style..."])
             .alias(&["d", "dst", "ddim"])
-            .params("{name, current?, <style fields or DIM* variables, e.g. arrowSize / DIMASZ, DIMTSZ, DIMBLK, DIMTAD, DIMLUNIT…>} → styles"),
+            .params("{name (default \"GOST 2.307\" with the preset), preset?: \"gost\" (GOST 2.307: closed filled arrows 3.5, text 3.5 above the line and aligned, type B text style, comma decimals), current?, <style fields or DIM* variables, e.g. arrowSize / DIMASZ, DIMTSZ, DIMBLK, DIMTAD, DIMLUNIT…>} → styles"),
         CommandSpec::new("dimstyle.dimension", "Dimension Style...", run_dimstyle).menu(&["Dimension", "Dimension Style..."]).params("same as `dimstyle`"),
         CommandSpec::new("dimstyle.list", "List Dimension Styles", run_dimstyle_list).params("{name?} → styles (with all variables for `name`)").noundo(),
         CommandSpec::new("dimstyle.rename", "Rename Dimension Style", run_dimstyle_rename).params("{from, to}"),
@@ -653,11 +653,7 @@ fn styles_json(d: &cadcraft_doc::Drawing) -> Value {
 }
 
 fn run_style(s: &mut Session, p: &Value) -> Result<Value> {
-    let gost = match str_param(p, "preset").map(str::trim) {
-        None => false,
-        Some(t) if ["gost", "gost-b", "gost-2.304-b", "gost 2.304 b"].iter().any(|g| t.eq_ignore_ascii_case(g)) => true,
-        Some(t) => return Err(bad("style", format!("unknown preset `{t}` (gost)"))),
-    };
+    let gost = gost_preset("style", p)?;
     let name = match str_param(p, "name") {
         Some(n) => n.trim().to_string(),
         None if gost => cadcraft_doc::TextStyle::GOST_TYPE_B.to_string(),
@@ -825,8 +821,36 @@ fn dimstyles_json(d: &cadcraft_doc::Drawing) -> Value {
     json!({ "current": d.header.str("DIMSTYLE", "Standard"), "styles": d.dim_styles.iter().map(|s| s.name.clone()).collect::<Vec<_>>() })
 }
 
+/// Whether a STYLE or DIMSTYLE `preset` names the GOST preset (an error for another preset).
+fn gost_preset(cmd: &str, p: &Value) -> Result<bool> {
+    match str_param(p, "preset").map(str::trim) {
+        None => Ok(false),
+        Some(t) if ["gost", "gost-b", "gost-2.304-b", "gost 2.304 b", "gost-2.307", "gost 2.307"].iter().any(|g| t.eq_ignore_ascii_case(g)) => {
+            Ok(true)
+        }
+        Some(t) => Err(bad(cmd, format!("unknown preset `{t}` (gost)"))),
+    }
+}
+
+/// The GOST 2.304 type B text style, added when the drawing doesn't have it. Returns its name.
+fn ensure_gost_text_style(d: &mut cadcraft_doc::Drawing) -> String {
+    let name = cadcraft_doc::TextStyle::GOST_TYPE_B;
+    match d.text_style(name) {
+        Some(t) => t.name.clone(),
+        None => {
+            d.text_styles.push(cadcraft_doc::TextStyle::gost_type_b(name));
+            name.to_string()
+        }
+    }
+}
+
 fn run_dimstyle(s: &mut Session, p: &Value) -> Result<Value> {
-    let name = str_param(p, "name").ok_or_else(|| bad("dimstyle", "`name` is required"))?.trim().to_string();
+    let gost = gost_preset("dimstyle", p)?;
+    let name = match str_param(p, "name") {
+        Some(n) => n.trim().to_string(),
+        None if gost => cadcraft_doc::DimStyle::GOST.to_string(),
+        None => return Err(bad("dimstyle", "`name` is required")),
+    };
     if name.is_empty() || name.len() > 255 {
         return Err(bad("dimstyle", "bad style name"));
     }
@@ -839,10 +863,18 @@ fn run_dimstyle(s: &mut Session, p: &Value) -> Result<Value> {
             d.dim_styles.len() - 1
         }
     };
+    // A preset resets the style to its values (with the text style it uses); the other
+    // parameters then adjust it.
+    if gost {
+        let text_style = ensure_gost_text_style(d);
+        if let Some(st) = d.dim_styles.get_mut(idx) {
+            *st = cadcraft_doc::DimStyle { text_style, ..cadcraft_doc::DimStyle::gost(&st.name) };
+        }
+    }
     let mut rejected = Vec::new();
     if let (Some(st), Some(src)) = (d.dim_styles.get_mut(idx), p.as_object()) {
         let fields: serde_json::Map<String, Value> =
-            src.iter().filter(|(k, _)| !matches!(k.as_str(), "name" | "current")).map(|(k, v)| (k.clone(), v.clone())).collect();
+            src.iter().filter(|(k, _)| !matches!(k.as_str(), "name" | "current" | "preset")).map(|(k, v)| (k.clone(), v.clone())).collect();
         rejected = st.apply_fields(&fields);
     }
     if bool_or(p, "current", true) {

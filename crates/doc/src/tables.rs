@@ -610,6 +610,40 @@ impl DimStyle {
     }
 
     /// The ISO-25 style for metric drawings.
+    /// The name [`DimStyle::gost`] gives its style.
+    pub const GOST: &'static str = "GOST 2.307";
+
+    /// A GOST 2.307 dimension style for millimetre drawings: closed filled arrows, text 3.5 mm in
+    /// the GOST 2.304 type B style ([`TextStyle::GOST_TYPE_B`], which the caller makes sure
+    /// exists), above the dimension line and aligned with it, a comma as the decimal separator,
+    /// trailing zeros suppressed, extension lines from the object and 2 mm past the dimension
+    /// line, 7 mm between baseline dimensions and no centre marks.
+    pub fn gost(name: &str) -> Self {
+        DimStyle {
+            name: name.into(),
+            arrow_size: 3.5,
+            ext_offset: 0.0,
+            ext_extend: 2.0,
+            text_height: 3.5,
+            text_gap: 1.0,
+            decimals: 2,
+            angular_decimals: 0,
+            text_above: 1,
+            text_inside_horizontal: false,
+            text_outside_horizontal: false,
+            arrow_block: String::new(),
+            tick_size: 0.0,
+            text_style: TextStyle::GOST_TYPE_B.into(),
+            center_mark: 0.0,
+            zero_suppression: 8,
+            linear_unit: 2,
+            decimal_separator: ",".into(),
+            baseline_spacing: 7.0,
+            force_line_inside: true,
+            ..DimStyle::iso25()
+        }
+    }
+
     pub fn iso25() -> Self {
         DimStyle {
             name: "ISO-25".into(),
