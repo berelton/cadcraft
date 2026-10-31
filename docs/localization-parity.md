@@ -1,6 +1,6 @@
 # Localization parity
 
-> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-22 · **Change:** minor (the command line enables the OS IME and handles composition/commit, so single-line TEXT edits accept CJK input; previously: Brazilian Portuguese row updated and terminology reviewed; previously: Swedish catalog completed with the 95 strings added since; previously: Swedish catalog added: complete catalog, menu headings, native-speaker terminology review; previously: complete current Korean catalog with Hangul font coverage) · **Target:** Autodesk AutoCAD 2027 for Mac (26.0)
+> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-31 · **Change:** minor (the stroke font draws Cyrillic and `№`, and STYLE has a GOST 2.304 type B preset; previously: the command line enables the OS IME and handles composition/commit, so single-line TEXT edits accept CJK input; previously: Brazilian Portuguese row updated and terminology reviewed; previously: Swedish catalog completed with the 95 strings added since; previously: Swedish catalog added: complete catalog, menu headings, native-speaker terminology review; previously: complete current Korean catalog with Hangul font coverage) · **Target:** Autodesk AutoCAD 2027 for Mac (26.0)
 
 How far CADCraft's interface and drawing text are from AutoCAD's languages. Summarised in
 [ROADMAP.md](../ROADMAP.md#languages); work items in [gaps.md](gaps.md#localization).
@@ -36,7 +36,9 @@ shaping and right-to-left text through TrueType, vertical SHX text styles.
   Bidirectional Algorithm and OpenType shaping with `harfrust` (Arabic, Persian and Urdu joining,
   lam-alef, ZWNJ, marks; Hebrew), in TEXT and MTEXT including wrapping (#287). Left-to-right lines
   are still placed one glyph per code point: **no shaping** for Devanagari and other Indic
-  scripts, and **no vertical text**. SHX fonts are not read; our stroke font stands in.
+  scripts, and **no vertical text**. SHX fonts are not read; our stroke font stands in. The stroke
+  font draws the Russian alphabet and `№` itself (no installed font needed), and `style {preset:
+  "gost"}` makes a GOST 2.304 type B style (15° slant, width 0.9) that new TEXT takes.
 - **Text input:** egui/winit IME. The command line — which collects single-line TEXT edits and
   other prompt text — now enables the operating system IME while a prompt asks for text and shows
   composition (pre-edit) text until it is committed, so Chinese, Japanese and Korean input works
@@ -89,6 +91,7 @@ each language, which needs humans. Translations parallelise fully once the catal
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-31 | minor | Stroke font: Russian alphabet (GOST 2.304 letters, our own glyphs drawn in code) and `№`; STYLE preset `gost` (GOST 2.304 type B); new TEXT takes its style's width factor and slant (NSAI-8096) |
 | 2026-10-22 | minor | Command line IME: enabled while a prompt collects text, composition shown but not saved, commit inserted once; single-line TEXT edits accept CJK input (#1761) |
 | 2026-10-19 | minor | Brazilian Portuguese: row brought up to date (it still read 0%); native-speaker terminology pass on 69 rows (Bind as Integrar, prompt keywords and SPDX kept in English, Thaw Layer, Snap type, Revolve fixed; snap, viewport, grip, offset, layer on/off and multiline wording made consistent with Brazilian usage) |
 | 2026-10-15 | minor | Greek (`el`) catalog: 1,330 rows, context/plural/locale/font tests; review pending |

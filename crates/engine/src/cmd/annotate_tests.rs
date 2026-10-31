@@ -575,3 +575,31 @@ fn linetype_rename_updates_references() {
     assert!(s.execute("rename", &json!({ "table": "linetype", "from": "ByLayer", "to": "X" })).is_err());
     assert_eq!(s.doc().unwrap().entity(by_layer).unwrap().common.linetype, "ByLayer");
 }
+
+/// NSAI-8096 A1: one call makes a GOST 2.304 type B text style (stroke font, 15° slant, 0.9
+/// width) and makes it current; a preset can be adjusted and named, and bad presets are refused.
+#[test]
+fn style_gost_preset() {
+    let mut s = Session::new();
+    let r = s.execute("style", &json!({ "preset": "gost" })).unwrap();
+    assert_eq!(r["current"], "GOST 2.304 B");
+    let d = s.doc().unwrap();
+    let st = d.text_style("GOST 2.304 B").unwrap();
+    assert_eq!(st.font, "CADCraft Stroke");
+    assert!((st.oblique - 15f64.to_radians()).abs() < 1e-12 && (st.width_factor - 0.9).abs() < 1e-12 && st.height == 0.0);
+    s.execute("style", &json!({ "preset": "GOST-2.304-B", "name": "Shtamp", "height": 3.5, "current": false })).unwrap();
+    let st = s.doc().unwrap().text_style("Shtamp").unwrap().clone();
+    assert!((st.height - 3.5).abs() < 1e-12 && (st.oblique - 15f64.to_radians()).abs() < 1e-12);
+    assert_eq!(s.doc().unwrap().header.str("TEXTSTYLE", ""), "GOST 2.304 B");
+    assert!(s.execute("style", &json!({ "preset": "din" })).is_err());
+    assert!(s.execute("style", &json!({})).is_err());
+    let t = h(&s.execute("text", &json!({ "at": [0, 0], "text": "Чертёж №1", "height": 5 })).unwrap());
+    match &s.doc().unwrap().entity(t).unwrap().kind {
+        // New text takes the style's slant and width.
+        EntityKind::Text(tx) => {
+            assert_eq!(tx.style, "GOST 2.304 B");
+            assert!((tx.oblique - 15f64.to_radians()).abs() < 1e-12 && (tx.width_factor - 0.9).abs() < 1e-12);
+        }
+        other => panic!("{other:?}"),
+    }
+}

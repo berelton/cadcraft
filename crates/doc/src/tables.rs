@@ -141,6 +141,19 @@ impl Default for TextStyle {
     }
 }
 
+impl TextStyle {
+    /// The name [`TextStyle::gost_type_b`] gives its style.
+    pub const GOST_TYPE_B: &'static str = "GOST 2.304 B";
+
+    /// A GOST 2.304 type B drafting style in the stroke font: letters slanted 75° to the
+    /// baseline (15° oblique) and a width factor of 0.9, which brings the stroke font's capitals
+    /// (4/6 of the height wide) to the standard's 6/10 h and its spacing near 2/10 h. The height
+    /// is not fixed, so one style serves the standard sizes (2.5, 3.5, 5, 7, 10, 14 mm).
+    pub fn gost_type_b(name: &str) -> TextStyle {
+        TextStyle { name: name.into(), width_factor: 0.9, oblique: 15f64.to_radians(), ..TextStyle::default() }
+    }
+}
+
 /// Dimension style variables (the subset that affects geometry and text).
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
@@ -597,6 +610,40 @@ impl DimStyle {
     }
 
     /// The ISO-25 style for metric drawings.
+    /// The name [`DimStyle::gost`] gives its style.
+    pub const GOST: &'static str = "GOST 2.307";
+
+    /// A GOST 2.307 dimension style for millimetre drawings: closed filled arrows, text 3.5 mm in
+    /// the GOST 2.304 type B style ([`TextStyle::GOST_TYPE_B`], which the caller makes sure
+    /// exists), above the dimension line and aligned with it, a comma as the decimal separator,
+    /// trailing zeros suppressed, extension lines from the object and 2 mm past the dimension
+    /// line, 7 mm between baseline dimensions and no centre marks.
+    pub fn gost(name: &str) -> Self {
+        DimStyle {
+            name: name.into(),
+            arrow_size: 3.5,
+            ext_offset: 0.0,
+            ext_extend: 2.0,
+            text_height: 3.5,
+            text_gap: 1.0,
+            decimals: 2,
+            angular_decimals: 0,
+            text_above: 1,
+            text_inside_horizontal: false,
+            text_outside_horizontal: false,
+            arrow_block: String::new(),
+            tick_size: 0.0,
+            text_style: TextStyle::GOST_TYPE_B.into(),
+            center_mark: 0.0,
+            zero_suppression: 8,
+            linear_unit: 2,
+            decimal_separator: ",".into(),
+            baseline_spacing: 7.0,
+            force_line_inside: true,
+            ..DimStyle::iso25()
+        }
+    }
+
     pub fn iso25() -> Self {
         DimStyle {
             name: "ISO-25".into(),
