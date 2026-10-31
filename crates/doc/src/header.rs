@@ -166,3 +166,48 @@ impl Header {
         h
     }
 }
+
+/// The length of one `$INSUNITS` unit (BLOCK_RECORD group 70 uses the same codes) in metres:
+/// 1 inch, 2 feet, 3 miles, 4 mm, 5 cm, 6 m, 7 km, 8 microinches, 9 mils, 10 yards,
+/// 11 ångströms, 12 nm, 13 µm, 14 dm, 15 dam, 16 hm, 17 Gm, 18 astronomical units,
+/// 19 light years, 20 parsecs, 21–24 US survey feet, inches, yards and miles. `None` for 0
+/// (unitless) and unknown codes.
+pub fn insunits_metres(code: i64) -> Option<f64> {
+    const SURVEY_FOOT: f64 = 1200.0 / 3937.0;
+    Some(match code {
+        1 => 0.0254,
+        2 => 0.3048,
+        3 => 1609.344,
+        4 => 1e-3,
+        5 => 1e-2,
+        6 => 1.0,
+        7 => 1e3,
+        8 => 0.0254e-6,
+        9 => 0.0254e-3,
+        10 => 0.9144,
+        11 => 1e-10,
+        12 => 1e-9,
+        13 => 1e-6,
+        14 => 0.1,
+        15 => 10.0,
+        16 => 100.0,
+        17 => 1e9,
+        18 => 149_597_870_700.0,
+        19 => 9_460_730_472_580_800.0,
+        20 => 30_856_775_814_913_673.0,
+        21 => SURVEY_FOOT,
+        22 => SURVEY_FOOT / 12.0,
+        23 => SURVEY_FOOT * 3.0,
+        24 => SURVEY_FOOT * 5280.0,
+        _ => return None,
+    })
+}
+
+/// The factor that converts lengths in `$INSUNITS` code `from` to code `to`, as INSERT, XATTACH
+/// and IMPORT scale content between drawings: 1 when either side is unitless or unknown.
+pub fn insunits_factor(from: i64, to: i64) -> f64 {
+    match (insunits_metres(from), insunits_metres(to)) {
+        (Some(a), Some(b)) if from != to => a / b,
+        _ => 1.0,
+    }
+}

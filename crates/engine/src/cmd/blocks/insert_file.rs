@@ -3,7 +3,8 @@
 //!
 //! A file becomes a block named after it (or after the part before `=`): its model space, with
 //! the file's `$INSBASE` as the base point, plus the layers, linetypes, styles and blocks it needs
-//! (names this drawing already has keep this drawing's definitions). The file is read through the
+//! (names this drawing already has keep this drawing's definitions), and the file's `$INSUNITS`
+//! as the block's units (references are scaled to this drawing's units). The file is read through the
 //! host's io hooks like OPEN, so the engine stays I/O-agnostic.
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -116,6 +117,8 @@ fn define_from(s: &mut Session, src: &Drawing, name: &str) -> Result<String> {
     }
     let mut b = Block::new(&name);
     b.base = src.header.point("INSBASE").filter(|p| p.x.is_finite() && p.y.is_finite() && p.z.is_finite()).unwrap_or_default();
+    // The file's units become the block's, so references scale to this drawing's units.
+    b.units = u8::try_from(src.header.i64("INSUNITS", 0)).unwrap_or(0);
     let mut ents = Vec::new();
     for e in src.model.iter() {
         let e = adopt(&mut d, e, &renames);

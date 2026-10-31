@@ -18,7 +18,7 @@ use cadcraft_render::raster::{RasterOptions, View};
 use serde_json::{Value, json};
 
 use super::file::{base64_decode, base64_encode, io};
-use super::{CommandSpec, bad, point_value, str_param};
+use super::{CommandSpec, bad, bool_or, point_value, str_param};
 
 use crate::{EngineError, Result, Session};
 
@@ -35,7 +35,7 @@ pub fn specs() -> Vec<CommandSpec> {
         CommandSpec::new("import", "Import...", run_import)
             .menu(&["File", "Import..."])
             .alias(&["imp"])
-            .params("{path | data: base64, name?: \"x.dwg\"} (DXF or DWG), at?: [x,y] (default 0,0), scale?: (default 1) → {imported, handles, layers, styles, blocks}"),
+            .params("{path | data: base64, name?: \"x.dwg\"} (DXF or DWG), at?: [x,y] (default 0,0), scale?: (default 1; multiplied by the file-to-drawing $INSUNITS factor), matchUnits?: (default true) → {imported, handles, layers, styles, blocks}"),
         CommandSpec::new("export", "Export...", run_export)
             .menu(&["File", "Export..."])
             .alias(&["exp"])
@@ -150,7 +150,13 @@ fn run_import(s: &mut Session, p: &Value) -> Result<Value> {
     };
     let src = (hooks.read)(&bytes, &name).map_err(|e| bad("import", e))?;
     let file = std::path::Path::new(&name).file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
-    import_drawing(s, &src, at, scale, &file)
+    // A drawing in other units comes in at this drawing's size (`matchUnits: false` keeps its numbers).
+    let units = if bool_or(p, "matchUnits", true) {
+        cadcraft_doc::insunits_factor(src.header.i64("INSUNITS", 0), s.doc()?.header.i64("INSUNITS", 0))
+    } else {
+        1.0
+    };
+    import_drawing(s, &src, at, scale * units, &file)
 }
 
 /// Copy `src`'s model space into the current space (scaled about the origin, then moved to
