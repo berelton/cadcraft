@@ -342,19 +342,32 @@ impl<'a> Cur<'a> {
     }
 }
 
-/// Binary DXF (R13+: 2-byte group codes).
+/// Binary DXF, after the sentinel. R13 and later store each group code in 2 bytes; R12 and
+/// earlier in 1 byte, with 255 escaping a 2-byte code (DXF Reference, "Binary DXF Files"). The
+/// layout is told from the first tag: a file starts with group 0 (`SECTION`, so `00 'S'` in R12
+/// and `00 00` in R13+) or with an escaped code such as a 999 comment (`FF E7 03` in R12).
 pub fn parse_binary(b: &[u8]) -> Result<Vec<Tag>> {
     parse_binary_with_limit(b, MAX_TAGS)
 }
 
+/// Whether a binary DXF body uses R12's 1-byte group codes.
+fn one_byte_codes(b: &[u8]) -> bool {
+    match (b.first(), b.get(1)) {
+        (Some(0), Some(&next)) => next != 0,
+        (Some(255), _) => true,
+        _ => false,
+    }
+}
+
 fn parse_binary_with_limit(b: &[u8], max_tags: usize) -> Result<Vec<Tag>> {
+    let narrow = one_byte_codes(b);
     let mut c = Cur { b, p: 0 };
     let mut text = codepage::BinaryText::default();
     let mut tags = Vec::new();
     while c.p < b.len() {
-        let mut code = i32::from(c.i16()?);
+        let mut code = if narrow { i32::from(c.u8()?) } else { i32::from(c.i16()?) };
         if code == 255 {
-            code = i32::from(c.i16()?);
+            code = if narrow { i32::from(u16::from_le_bytes(c.i16()?.to_le_bytes())) } else { i32::from(c.i16()?) };
         }
         let v = match kind_of(code) {
             Kind::Str => Value::Str(unescape_unicode(&text.string(code, c.cstr()?))),
@@ -622,6 +635,60 @@ mod tests {
         let tags = parse(&b).unwrap();
         assert_eq!(tags[1], Tag::f(10, 3.25));
         assert_eq!(tags[2], Tag::i(62, 5));
+    }
+
+    /// R12 binary DXF: 1-byte group codes, 255 escaping a 2-byte code (xdata 1001/1040).
+    #[test]
+    fn binary_r12_parse() {
+        let mut b = BINARY_SENTINEL.to_vec();
+        let push_str = |b: &mut Vec<u8>, code: u8, s: &str| {
+            b.push(code);
+            b.extend_from_slice(s.as_bytes());
+            b.push(0);
+        };
+        push_str(&mut b, 0, "SECTION");
+        push_str(&mut b, 2, "ENTITIES");
+        push_str(&mut b, 0, "LINE");
+        push_str(&mut b, 8, "0");
+        b.push(10);
+        b.extend_from_slice(&3.25f64.to_le_bytes());
+        b.push(62);
+        b.extend_from_slice(&5i16.to_le_bytes());
+        b.push(255);
+        b.extend_from_slice(&1001u16.to_le_bytes());
+        b.extend_from_slice(b"APP\0");
+        b.push(255);
+        b.extend_from_slice(&1040u16.to_le_bytes());
+        b.extend_from_slice(&1.5f64.to_le_bytes());
+        push_str(&mut b, 0, "ENDSEC");
+        push_str(&mut b, 0, "EOF");
+        let tags = parse(&b).unwrap();
+        assert_eq!(tags[0], Tag::s(0, "SECTION"));
+        assert_eq!(tags[4], Tag::f(10, 3.25));
+        assert_eq!(tags[5], Tag::i(62, 5));
+        assert_eq!(tags[6], Tag::s(1001, "APP"));
+        assert_eq!(tags[7], Tag::f(1040, 1.5));
+        assert_eq!(tags.last(), Some(&Tag::s(0, "EOF")));
+        let secs = sections(&tags);
+        assert_eq!(secs.len(), 1);
+        assert_eq!(records(&secs[0].tags)[0].0, "LINE");
+        // A file opening with an escaped 999 comment is R12 too.
+        let mut c = BINARY_SENTINEL.to_vec();
+        c.push(255);
+        c.extend_from_slice(&999u16.to_le_bytes());
+        c.extend_from_slice(b"hi\0");
+        push_str(&mut c, 0, "EOF");
+        assert_eq!(parse(&c).unwrap()[0], Tag::s(999, "hi"));
+    }
+
+    /// Truncated or hostile R12 binary input is an error, never a panic.
+    #[test]
+    fn binary_r12_hostile() {
+        for tail in [&[0u8, b'S'][..], &[255], &[255, 0xE7], &[0, b'S', 0, 10, 1, 2], &[0, 1, 255]] {
+            let mut b = BINARY_SENTINEL.to_vec();
+            b.extend_from_slice(tail);
+            let _ = parse(&b);
+        }
     }
 
     #[test]

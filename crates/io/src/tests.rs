@@ -2813,3 +2813,49 @@ fn proxies_keep_their_class_when_classes_are_rewritten() {
         dxf_records(&pairs, "ACAD_PROXY_OBJECT").iter().map(|r| classes[own_91(r).parse::<usize>().unwrap() - 500].clone()).collect();
     assert_eq!(names, ["VISUALSTYLE", "WIDGETX"]);
 }
+
+/// NSAI-8082 B7: a binary DXF R12 (1-byte group codes) opened with "no sections found".
+#[test]
+fn reads_binary_r12_dxf() {
+    let mut b = b"AutoCAD Binary DXF\r\n\x1a\0".to_vec();
+    let s = |b: &mut Vec<u8>, code: u8, v: &str| {
+        b.push(code);
+        b.extend_from_slice(v.as_bytes());
+        b.push(0);
+    };
+    let r = |b: &mut Vec<u8>, code: u8, v: f64| {
+        b.push(code);
+        b.extend_from_slice(&v.to_le_bytes());
+    };
+    s(&mut b, 0, "SECTION");
+    s(&mut b, 2, "HEADER");
+    s(&mut b, 9, "$ACADVER");
+    s(&mut b, 1, "AC1009");
+    s(&mut b, 0, "ENDSEC");
+    s(&mut b, 0, "SECTION");
+    s(&mut b, 2, "ENTITIES");
+    s(&mut b, 0, "LINE");
+    s(&mut b, 8, "Walls");
+    r(&mut b, 10, 1.0);
+    r(&mut b, 20, 2.0);
+    r(&mut b, 30, 0.0);
+    r(&mut b, 11, 4.0);
+    r(&mut b, 21, 6.0);
+    r(&mut b, 31, 0.0);
+    s(&mut b, 0, "CIRCLE");
+    s(&mut b, 8, "0");
+    r(&mut b, 10, 0.0);
+    r(&mut b, 20, 0.0);
+    r(&mut b, 30, 0.0);
+    r(&mut b, 40, 2.5);
+    s(&mut b, 0, "ENDSEC");
+    s(&mut b, 0, "EOF");
+    let d = read(&b, "r12.dxf").unwrap();
+    let kinds: Vec<_> = d.model.iter().map(|e| e.kind.type_name()).collect();
+    assert_eq!(kinds.len(), 2, "{kinds:?}");
+    match &d.model.iter().next().unwrap().kind {
+        EntityKind::Line(l) => assert_eq!((l.a, l.b), (Vec3::new(1.0, 2.0, 0.0), Vec3::new(4.0, 6.0, 0.0))),
+        k => panic!("{}", k.type_name()),
+    }
+    assert_eq!(d.model.iter().next().unwrap().common.layer, "Walls");
+}
