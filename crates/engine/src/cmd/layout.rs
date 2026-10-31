@@ -81,7 +81,7 @@ pub fn specs() -> Vec<CommandSpec> {
             .menu(&["File", "Print..."])
             .key("Cmd+P")
             .alias(&["print"])
-            .params("{path? (else returns base64 `data`), layout?: current|\"Model\", paper?, landscape?, fit?: bool, scale?: number | \"1:50\", center?: bool (Model, default true), offset?: [x,y] mm (Model, when center is false; each within ±100000), lineweights?: bool, plotTransparency?: bool (default: the page setup's; PLOTTRANSPARENCYOVERRIDE 0/2 overrides it), plotArea?: extents|display|limits|window (Model) | layout, window?: [[x1,y1],[x2,y2]]} (typed or from the menu: the Plot dialog)")
+            .params("{path? (else returns base64 `data`; a .pdf, .png or .svg path picks that format), layout?: current|\"Model\", paper?, landscape?, fit?: bool, scale?: number | \"1:50\", center?: bool (Model, default true), offset?: [x,y] mm (Model, when center is false; each within ±100000), lineweights?: bool, plotTransparency?: bool (default: the page setup's; PLOTTRANSPARENCYOVERRIDE 0/2 overrides it), plotArea?: extents|display|limits|window (Model) | layout, window?: [[x1,y1],[x2,y2]]} (typed or from the menu: the Plot dialog)")
             .noundo(),
         CommandSpec::new("exportpdf", "Export to PDF...", |s, p| run_plot(s, &super::plotters::plot_options(s, p, "exportpdf")?, "exportpdf"))
             .menu(&["File", "Export to PDF..."])
@@ -784,6 +784,14 @@ fn run_plot(s: &mut Session, p: &Value, cmd: &str) -> Result<Value> {
         None => s.space(),
     };
     let mut opts = if p.is_object() { p.clone() } else { json!({}) };
+    // PLOT writes the format its path names (.pdf, .png, .svg), whatever the plotter device's
+    // output; other extensions keep the device's (PDF without one).
+    if cmd == "plot"
+        && let Some(want) = str_param(p, "path").and_then(image_ext)
+        && let Some(o) = opts.as_object_mut()
+    {
+        o.insert("output".into(), json!(want));
+    }
     if let Some(raw) = p.get("offset") {
         let values = raw
             .as_array()
@@ -844,6 +852,12 @@ fn run_plot(s: &mut Session, p: &Value, cmd: &str) -> Result<Value> {
         }
         None => Ok(json!({ "data": base64_encode(&bytes), "bytes": bytes.len(), "layout": layout, "pages": pages })),
     }
+}
+
+/// The plot output a path's extension names: pdf, png or svg (any case).
+fn image_ext(path: &str) -> Option<&'static str> {
+    let ext = std::path::Path::new(path).extension()?.to_str()?.to_ascii_lowercase();
+    ["pdf", "png", "svg"].into_iter().find(|e| *e == ext)
 }
 
 /// The model-space rectangle a plot of `plotArea` covers: `extents` (default) plots everything,

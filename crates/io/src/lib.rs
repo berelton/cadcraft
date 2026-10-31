@@ -26,7 +26,7 @@ use cadcraft_geom::Bounds2;
 pub use cadcraft_dxf::Version;
 pub use dxf_read::entity_from_groups;
 pub use dxf_write::entity_groups;
-pub use pdf::{PdfOptions, pdf, plot};
+pub use pdf::{PdfOptions, paper_for_plot, pdf, pdf_to_scale, plot};
 
 /// How a drawing is saved as DXF or DWG.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]

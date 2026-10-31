@@ -57,8 +57,8 @@ fn stdout_failed(e: std::io::Error) {
 
 const USAGE: &str = "usage:
   cadcraft-cli info FILE.dxf
-  cadcraft-cli convert IN.dxf OUT.(dxf|dwg|svg|png|pdf) [FRAMING]
-  cadcraft-cli run [FILE | --sample | --metric] [--script TEXT] [--script-file F.scr] [--cmd 'id {json}']... [--save OUT.dxf] [--export OUT.(png|svg|pdf)] [FRAMING]
+  cadcraft-cli convert IN.dxf OUT.(dxf|dwg|svg|png|pdf) [FRAMING] [--scale 1:1]
+  cadcraft-cli run [FILE | --sample | --metric] [--script TEXT] [--script-file F.scr] [--cmd 'id {json}']... [--save OUT.dxf] [--export OUT.(png|svg|pdf)] [FRAMING] [--scale 1:1]
   cadcraft-cli commands [FILTER]
   cadcraft-cli mcp [--connect HOST:PORT [--lazy] [--launch]]
   cadcraft-cli perf [N | FILE]
@@ -74,6 +74,9 @@ image framing (png 2400x1600, svg, pdf; always model space):
   --view extents           always fit the drawing extents.
   --view current           the current view (as last set by zoom/pan/view.set; a freshly
                            opened drawing's view is its extents plus a 10% margin).
+  --scale 1:1              PDF only: plot at this scale (paper mm, or inches in an imperial
+                           drawing, per drawing unit) on a page the size of the plotted area,
+                           an ISO A sheet when within 1% of one, instead of fitting a page.
 
 --cmd chaining (run):
   A --cmd parameter value of exactly \"{last}\" is replaced with the last object handle an
@@ -276,14 +279,18 @@ fn check_framed_output(framing: Framing, out: Option<&str>) -> Result<(), String
 fn convert(args: &[String]) -> Result<(), String> {
     let mut framing = Framing::Auto;
     let mut files = Vec::new();
+    let mut scale = None;
     let mut it = args.iter();
     while let Some(a) = it.next() {
-        if !framing_option(a, &mut it, &mut framing)? {
+        if a == "--scale" {
+            scale = Some(parse_scale(it.next().ok_or("--scale needs a ratio such as 1:1")?)?);
+        } else if !framing_option(a, &mut it, &mut framing)? {
             files.push(a);
         }
     }
     let [i, o] = files.as_slice() else { return Err(USAGE.into()) };
     check_framed_output(framing, Some(o))?;
+    check_scaled_output(scale, Some(o))?;
     let mut s = Session::empty();
     open(&mut s, i)?;
     if let Some(m) = skipped_message(s.doc().map_err(|e| e.to_string())?, i) {
@@ -295,7 +302,41 @@ fn convert(args: &[String]) -> Result<(), String> {
         eprintln!("{m}");
     }
     let window = export_window(&s, framing, None)?;
-    export_framed(&s, o, window)
+    export_scaled(&s, o, window, scale)
+}
+
+/// `--scale`: paper units per drawing unit, as a ratio `a:b` (1:1 true size, 1:2 half size) or
+/// a number.
+fn parse_scale(text: &str) -> Result<f64, String> {
+    let k = match text.split_once(':') {
+        Some((a, b)) => {
+            let a: f64 = a.trim().parse().map_err(|_| format!("--scale: bad ratio `{text}`"))?;
+            let b: f64 = b.trim().parse().map_err(|_| format!("--scale: bad ratio `{text}`"))?;
+            a / b
+        }
+        None => text.trim().parse().map_err(|_| format!("--scale: bad ratio `{text}`"))?,
+    };
+    if k.is_finite() && k > 0.0 { Ok(k) } else { Err(format!("--scale must be positive, got `{text}`")) }
+}
+
+/// `--scale` plots a PDF at that scale; it means nothing for other outputs.
+fn check_scaled_output(scale: Option<f64>, out: Option<&str>) -> Result<(), String> {
+    match (scale, out) {
+        (None, _) => Ok(()),
+        (Some(_), Some(o)) if o.to_ascii_lowercase().ends_with(".pdf") => Ok(()),
+        (Some(_), _) => Err("--scale applies to PDF output (OUT.pdf) only".into()),
+    }
+}
+
+/// [`export_framed`], or with a scale a PDF at that scale on a page its size (an ISO A sheet when
+/// it is one).
+fn export_scaled(s: &Session, out: &str, window: Option<Bounds2>, scale: Option<f64>) -> Result<(), String> {
+    let Some(k) = scale else { return export_framed(s, out, window) };
+    let d = s.doc().map_err(|e| e.to_string())?;
+    let bytes = cadcraft_io::pdf_to_scale(d, window, k).map_err(|e| e.to_string())?;
+    write_atomic(out, &bytes).map_err(|e| format!("{out}: {e}"))?;
+    eprintln!("wrote {out} ({} bytes)", bytes.len());
+    Ok(())
 }
 
 /// The warning for the model-space entities of `path` an image can't show, by type (those kept
@@ -461,6 +502,7 @@ fn run(args: &[String]) -> Result<(), String> {
     let mut save = None;
     let mut exp: Option<String> = None;
     let mut framing = Framing::Auto;
+    let mut scale = None;
     let mut steps: Vec<(String, String)> = Vec::new();
     while let Some(a) = it.next() {
         if framing_option(a, &mut it, &mut framing)? {
@@ -481,6 +523,7 @@ fn run(args: &[String]) -> Result<(), String> {
             "--cmd" => steps.push(("cmd".into(), it.next().ok_or("--cmd needs `id {json}`")?.clone())),
             "--save" => save = Some(it.next().ok_or("--save needs a path")?.clone()),
             "--export" => exp = Some(it.next().ok_or("--export needs a path")?.clone()),
+            "--scale" => scale = Some(parse_scale(it.next().ok_or("--scale needs a ratio such as 1:1")?)?),
             f if !f.starts_with("--") => open(&mut s, f)?,
             other => return Err(format!("unknown option {other}")),
         }
@@ -489,6 +532,7 @@ fn run(args: &[String]) -> Result<(), String> {
         s.new_drawing(false);
     }
     check_framed_output(framing, exp.as_deref())?;
+    check_scaled_output(scale, exp.as_deref())?;
     let before = model_views(&s);
     let mut last_handle: Option<Handle> = None;
     for (kind, body) in steps {
@@ -529,7 +573,7 @@ fn run(args: &[String]) -> Result<(), String> {
     }
     if let Some(p) = exp {
         let window = if cadcraft_io::is_image(&p) { export_window(&s, framing, Some(&before))? } else { None };
-        export_framed(&s, &p, window)?;
+        export_scaled(&s, &p, window, scale)?;
     }
     Ok(())
 }
@@ -1107,5 +1151,37 @@ mod tests {
         assert_eq!(validate_options("info", &args(&["missing.dxf", "--typo"]), NO_OPTIONS), Err("info: unknown option --typo".into()));
         assert_eq!(validate_options("perf", &args(&["1", "--typo"]), NO_OPTIONS), Err("perf: unknown option --typo".into()));
         assert_eq!(validate_options("sample", &args(&["bracket", "out.dxf", "--typo"]), NO_OPTIONS), Err("sample: unknown option --typo".into()));
+    }
+
+    #[test]
+    fn scale_option_plots_a_true_size_pdf() {
+        assert_eq!(parse_scale("1:1"), Ok(1.0));
+        assert_eq!(parse_scale("1:2"), Ok(0.5));
+        assert_eq!(parse_scale(" 2 : 1 "), Ok(2.0));
+        assert_eq!(parse_scale("0.25"), Ok(0.25));
+        for bad in ["", "1:0", "0:1", "-1:1", "a:b", "1:", "NaN", "inf", "1e400"] {
+            assert!(parse_scale(bad).is_err(), "{bad}");
+        }
+        assert!(check_scaled_output(Some(1.0), Some("a.png")).is_err());
+        assert!(check_scaled_output(Some(1.0), None).is_err());
+        assert!(check_scaled_output(Some(1.0), Some("a.PDF")).is_ok());
+        assert!(check_scaled_output(None, Some("a.png")).is_ok());
+
+        let dir = scratch_dir("scale");
+        let out = dir.join("sheet.pdf");
+        let out = out.to_str().expect("utf-8 path").to_string();
+        let a: Vec<String> = ["--metric", "--cmd", "rectang {\"p1\":[0,0],\"p2\":[420,297]}", "--export", &out, "--scale", "1:1"]
+            .iter()
+            .map(|x| x.to_string())
+            .collect();
+        run(&a).expect("run --scale");
+        let pdf = std::fs::read(&out).expect("read pdf");
+        let text = String::from_utf8_lossy(&pdf);
+        assert!(text.starts_with("%PDF"));
+        // An A3 landscape page (420 × 297 mm in points).
+        assert!(text.contains("1190.55") && text.contains("841.88"), "no A3 MediaBox");
+        let bad: Vec<String> = ["--metric", "--export", &out, "--scale", "1:0"].iter().map(|x| x.to_string()).collect();
+        assert!(run(&bad).is_err());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

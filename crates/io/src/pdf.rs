@@ -344,6 +344,59 @@ impl Map {
     }
 }
 
+/// ISO A sheet sizes (short × long side, mm) a scaled plot snaps to.
+const ISO_A: [(f64, f64); 6] = [(148.0, 210.0), (210.0, 297.0), (297.0, 420.0), (420.0, 594.0), (594.0, 841.0), (841.0, 1189.0)];
+
+/// The paper (width, height in mm) for a plot `w` × `h` mm: an ISO A sheet in the same
+/// orientation when the plot is within 1% (and 2 mm) of one, else exactly the plot's size.
+pub fn paper_for_plot(w: f64, h: f64) -> (f64, f64) {
+    let near = |a: f64, b: f64| (a - b).abs() <= (b * 0.01).min(2.0);
+    for (short, long) in ISO_A {
+        for (pw, ph) in [(short, long), (long, short)] {
+            if near(w, pw) && near(h, ph) {
+                return (pw, ph);
+            }
+        }
+    }
+    (w, h)
+}
+
+/// A model-space PDF at a fixed scale instead of fitted to a page: `scale` paper units (mm for a
+/// metric drawing, inches otherwise) per drawing unit, so 1.0 is true size. The page is as large
+/// as `window` (default: the extents) at that scale, snapped to an ISO A sheet when it is within
+/// 1% of one: a 420 × 297 mm frame drawn at 1:1 becomes an A3 page with every length true.
+pub fn pdf_to_scale(d: &Drawing, window: Option<Bounds2>, scale: f64) -> Result<Vec<u8>> {
+    if !(scale.is_finite() && scale > 0.0) {
+        return Err(IoError::Format("the plot scale must be a positive number".into()));
+    }
+    let area = window.unwrap_or_else(|| d.extents(&Space::Model));
+    if area.is_empty() || !(area.width().is_finite() && area.height().is_finite()) || area.width() <= 0.0 || area.height() <= 0.0 {
+        return Err(IoError::Format("nothing to plot: the drawing is empty".into()));
+    }
+    let unit = paper::paper_unit_mm(d);
+    let (w, h) = paper_for_plot(area.width() * scale * unit, area.height() * scale * unit);
+    if !(w.is_finite() && h.is_finite()) || w > MAX_SHEET_MM || h > MAX_SHEET_MM {
+        return Err(IoError::Format(format!(
+            "at this scale the plot is {:.0} × {:.0} mm, larger than the largest sheet ({MAX_SHEET_MM:.0} mm); use a smaller scale",
+            area.width() * scale * unit,
+            area.height() * scale * unit
+        )));
+    }
+    let o = PdfOptions {
+        paper_mm: Some((w.max(1.0), h.max(1.0))),
+        // The sheet is oriented by this flag (its long side across when set).
+        landscape: Some(w > h),
+        fit: Some(false),
+        scale: Some(scale),
+        center: Some(true),
+        margins: Some([0.0; 4]),
+        window: Some(area),
+        compress: true,
+        ..PdfOptions::default()
+    };
+    pdf(d, &Space::Model, &o)
+}
+
 /// Write a one-page vector PDF of a space.
 pub fn pdf(d: &Drawing, space: &Space, o: &PdfOptions) -> Result<Vec<u8>> {
     pdf_sheets(d, std::slice::from_ref(space), o)
