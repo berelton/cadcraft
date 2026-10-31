@@ -38,6 +38,15 @@ pub struct Run {
     pub width: f64,
 }
 
+/// A TEXT value as it reads: `%%` control codes decoded (`%%c` ⌀, `%%d` °, `%%p` ±, `%%%` %,
+/// `%%nnn` a character code) and the underline/overline toggles `%%u`/`%%o` dropped.
+pub fn plain_text(s: &str) -> String {
+    if !s.contains("%%") {
+        return s.to_string();
+    }
+    decode_controls(s).into_iter().map(|(c, _, _)| c).collect()
+}
+
 /// Replace `%%` control codes: `%%d` degree, `%%p` plus/minus, `%%c` diameter, `%%%` percent,
 /// `%%nnn` character code. Underline/overline toggles (`%%u`, `%%o`) are returned as flags
 /// per character.
@@ -629,6 +638,14 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn plain_text_decodes_percent_codes() {
+        assert_eq!(plain_text("%%c20 %%d %%p0.1 100%%% %%uA%%u %%o"), "⌀20 ° ±0.1 100% A ");
+        assert_eq!(plain_text("plain"), "plain");
+        assert_eq!(plain_text("%%"), "%%");
+        assert_eq!(plain_text("%%0659"), "A9");
     }
 
     #[test]
