@@ -2813,3 +2813,37 @@ fn proxies_keep_their_class_when_classes_are_rewritten() {
         dxf_records(&pairs, "ACAD_PROXY_OBJECT").iter().map(|r| classes[own_91(r).parse::<usize>().unwrap() - 500].clone()).collect();
     assert_eq!(names, ["VISUALSTYLE", "WIDGETX"]);
 }
+
+/// NSAI-8096 A5: a model-space PDF at a fixed scale, on a page the plotted area's size (snapped
+/// to an ISO A sheet), every length true.
+#[test]
+fn pdf_to_scale_plots_true_size_on_a_matching_sheet() {
+    use cadcraft_geom::Bounds2;
+    const PT: f64 = 72.0 / 25.4;
+    let mut d = Drawing::new_metric();
+    for (a, b) in [((0.0, 0.0), (420.0, 0.0)), ((420.0, 0.0), (420.0, 297.0)), ((420.0, 297.0), (0.0, 297.0)), ((0.0, 297.0), (0.0, 0.0))] {
+        d.add(&Space::Model, Common::default(), EntityKind::Line(Line { a: Vec3::new(a.0, a.1, 0.0), b: Vec3::new(b.0, b.1, 0.0) })).unwrap();
+    }
+    // 1:1 → an A3 landscape page; the frame's corners sit on the page edges.
+    let pdf = pdf_to_scale(&d, None, 1.0).unwrap();
+    let (w, h) = media_box(&pdf);
+    assert!((w - 420.0 * PT).abs() < 0.01 && (h - 297.0 * PT).abs() < 0.01, "{w} x {h}");
+    let content = check_pdf(&pdf);
+    let xs: Vec<f64> = pdf_read::drawn(&content).iter().filter(|o| o.op == "m" || o.op == "l").filter_map(|o| o.nums.first().copied()).collect();
+    let (lo, hi) = xs.iter().fold((f64::MAX, f64::MIN), |(a, b), x| (a.min(*x), b.max(*x)));
+    assert!((hi - lo - 420.0 * PT).abs() < 0.5, "drawn width {} pt", hi - lo);
+    // 1:2 → A5 landscape (210 × 148.5 snaps to 210 × 148); an area matching no sheet gets its
+    // own size.
+    let (w, h) = media_box(&pdf_to_scale(&d, None, 0.5).unwrap());
+    assert!((w - 210.0 * PT).abs() < 0.01 && (h - 148.0 * PT).abs() < 0.01, "{w} x {h}");
+    let win = Bounds2::new(Vec2::new(0.0, 0.0), Vec2::new(100.0, 50.0));
+    let (w, h) = media_box(&pdf_to_scale(&d, Some(win), 1.0).unwrap());
+    assert!((w - 100.0 * PT).abs() < 0.01 && (h - 50.0 * PT).abs() < 0.01, "{w} x {h}");
+    assert_eq!(paper_for_plot(420.3, 296.8), (420.0, 297.0));
+    assert_eq!(paper_for_plot(400.0, 297.0), (400.0, 297.0));
+    // Hostile scales, an empty drawing and a sheet too large are errors.
+    for k in [0.0, -1.0, f64::NAN, f64::INFINITY, 1e6] {
+        assert!(pdf_to_scale(&d, None, k).is_err(), "{k}");
+    }
+    assert!(pdf_to_scale(&Drawing::new_metric(), None, 1.0).is_err());
+}
